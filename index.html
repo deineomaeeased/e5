@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ninebot E3 Tuning v2</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap');
+        body { margin:0; padding:0; background:#0a0e14; color:#0ff; font-family:'Roboto Mono',monospace; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+        header { background:#1a2333; padding:15px; text-align:center; border-bottom:2px solid #0ff; }
+        .warning { background:#330; color:#ff0; padding:15px; margin:10px; border:1px solid #ff0; border-radius:8px; }
+        button { background:#ff0044; color:white; border:none; padding:15px; font-size:18px; width:100%; margin:10px 0; border-radius:8px; font-weight:bold; }
+        .log { background:#000; color:#0f0; padding:10px; height:280px; overflow-y:auto; margin:10px; border:1px solid #0ff; font-size:13px; white-space:pre-wrap; }
+        input[type="range"] { width:100%; }
+    </style>
+</head>
+<body>
+    <header><h1>Ninebot E3 Tuning v2</h1></header>
+
+    <div class="warning">
+        ⚠️ <strong>WICHTIG:</strong> E3 Tuning per Bluetooth ist oft begrenzt.<br>
+        Teste zuerst <strong>2x schnell Power-Button</strong> für Sport-Modus!
+    </div>
+
+    <button onclick="connectDevice()">VERBINDEN mit KickScooter</button>
+    <button onclick="disconnectDevice()">TRENNEN</button>
+
+    <div style="padding:0 15px;">
+        <label>Max Speed: <span id="speed-val" style="color:#0f0;font-size:24px;">25</span> km/h</label>
+        <input type="range" id="speed" min="20" max="50" value="25" oninput="document.getElementById('speed-val').textContent=this.value">
+        
+        <button onclick="setSpeed()">SPEED LIMIT SETZEN (mit Checksum)</button>
+        <button onclick="sportModeTry()">Sport-Modus Versuch</button>
+        <button onclick="resetScooter()">Reset auf Werk</button>
+    </div>
+
+    <div class="log" id="log"></div>
+
+    <script>
+        let device = null, tx = null;
+        const SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+        const TX = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+
+        function log(msg) {
+            const el = document.getElementById('log');
+            el.innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}<br>`;
+            el.scrollTop = el.scrollHeight;
+        }
+
+        async function connectDevice() {
+            try {
+                log("Suche KickScooter...");
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{namePrefix: "KickScooter"}],
+                    optionalServices: [SERVICE]
+                });
+                const server = await device.gatt.connect();
+                log("GATT ✓");
+                const service = await server.getPrimaryService(SERVICE);
+                tx = await service.getCharacteristic(TX);
+                log("✅ Verbunden mit " + (device.name || "KickScooter"));
+            } catch(e) {
+                log("Fehler: " + (e.message || e));
+            }
+        }
+
+        function disconnectDevice() {
+            if (device && device.gatt.connected) device.gatt.disconnect();
+            log("Getrennt");
+        }
+
+        function calculateChecksum(data) {
+            let sum = 0;
+            for (let i = 0; i < data.length - 2; i++) {
+                sum += data[i];
+            }
+            const cs = (~sum + 1) & 0xFFFF;
+            data[data.length - 2] = cs & 0xFF;
+            data[data.length - 1] = (cs >> 8) & 0xFF;
+        }
+
+        async function setSpeed() {
+            if (!tx) return log("Nicht verbunden! Bitte zuerst verbinden.");
+            const kmh = parseInt(document.getElementById('speed').value);
+            const val = kmh * 10; // 0.1 km/h Einheit
+            const cmd = new Uint8Array([0x5A, 0xA5, 0x02, 0x3D, 0x20, 0x03, 0x74, val & 0xFF, (val >> 8) & 0xFF, 0x00, 0x00]);
+            calculateChecksum(cmd);
+            await tx.writeValue(cmd);
+            log(`Speed-Limit auf ${kmh} km/h gesendet (mit Checksum)`);
+        }
+
+        async function sportModeTry() {
+            if (!tx) return log("Nicht verbunden!");
+            log("Versuche Sport-Modus...");
+            const cmd = new Uint8Array([0x5A, 0xA5, 0x01, 0x3D, 0x20, 0x01, 0x01, 0x00, 0x00, 0x00]);
+            calculateChecksum(cmd);
+            await tx.writeValue(cmd);
+        }
+
+        async function resetScooter() {
+            if (!tx) return log("Nicht verbunden!");
+            log("Reset-Befehl gesendet...");
+            const cmd = new Uint8Array([0x5A, 0xA5, 0x01, 0x3D, 0x20, 0x01, 0x00, 0x00, 0x00, 0x00]);
+            calculateChecksum(cmd);
+            await tx.writeValue(cmd);
+        }
+
+        log("Ninebot E3 Tuning v2 geladen. Verbinde und teste!");
+    </script>
+</body>
+</html>
